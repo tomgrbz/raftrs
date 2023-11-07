@@ -390,7 +390,8 @@ class Replica:
             if silence: 
                 self.proc = subprocess.Popen(args, stdout=DEVNULL, stderr=DEVNULL, preexec_fn=os.setsid)
             else: 
-                self.proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=os.setsid)
+                
+                self.proc = subprocess.Popen(args=args, stdout=subprocess.PIPE, stderr=subprocess.PIPE, preexec_fn=None)
                 def make_non_blocking(fd):
                     try:
                         from fcntl import fcntl, F_GETFL, F_SETFL
@@ -404,7 +405,8 @@ class Replica:
                 self.fds = [self.proc.stdout, self.proc.stderr]
 
             self.alive = True
-        except:
+        except Exception as e:
+            print(e)
             fail('*** Simulator Error - Unable to execute ./3700kvstore')
             self.alive = False
         

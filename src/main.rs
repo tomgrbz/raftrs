@@ -41,8 +41,11 @@ struct Replica {
     id: String,
     role: StateRole,
     others: Vec<String>,
+    leader_id: String,
     socket: UdpSocket,
     addr: SocketAddr,
+    heartbeat_tick: u8,
+    election_tick: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -127,6 +130,7 @@ impl Replica {
             port,
             id: id.into(),
             role,
+            leader_id: "0000".into(),
             others,
             socket,
             addr,
@@ -247,7 +251,7 @@ impl Replica {
 
                 }
 
-            }
+            
             _ => {}
         }
     }
