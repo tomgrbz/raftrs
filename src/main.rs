@@ -2,23 +2,21 @@ use clap::Parser;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::str::from_utf8;
-use std::{
-    io::{Read, Write},
-    net::{SocketAddr, UdpSocket},
-};
+use std::time::{Duration, Instant};
+use std::{io::{Read, Write}, net::{SocketAddr, UdpSocket}, thread};
 
 const BROADCAST: &str = "FFFF";
 
 fn main() {
     let cli = Cli::parse();
-    let rep = Replica::new(cli.port, cli.id, cli.others);
+    let mut rep = Replica::new(cli.port, cli.id, cli.others);
     rep.run();
 }
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    port: u32,
+    port: u16,
     id: String,
     others: Vec<String>,
 }
@@ -37,15 +35,15 @@ enum StateRole {
 }
 
 struct Replica {
-    port: u32,
+    port: u16,
     id: String,
     role: StateRole,
     others: Vec<String>,
     leader_id: String,
     socket: UdpSocket,
     addr: SocketAddr,
-    heartbeat_tick: u8,
-    election_tick: u8,
+    heartbeat_elapsed: u8,
+    election_elapsed: u8,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -115,9 +113,9 @@ struct PutMessage {
 }
 
 impl Replica {
-    fn new(port: u32, id: String, others: Vec<String>) -> Self {
+    fn new(port: u16, id: String, others: Vec<String>) -> Self {
         let socket =
-            UdpSocket::bind("127.0.0.1:0").expect("Unable to create udp socket on localhost");
+            UdpSocket::bind(("127.0.0.1", port)).expect("Unable to create udp socket on localhost");
         let addr = socket.local_addr().expect("Failed to fetch local address");
         println!("Succesfully created Replica");
         //let others: Vec<String> = others.into_iter().map(|element| element.into()).collect();
@@ -134,6 +132,8 @@ impl Replica {
             others,
             socket,
             addr,
+            election_elapsed: 0,
+            heartbeat_elapsed: 0,
         };
         println!("Created Replica object");
         let msg = json!({
@@ -157,9 +157,31 @@ impl Replica {
             }
         }
     }
-    fn run(self) {
+    fn tick(&mut self) {
+        if self.role == StateRole::Leader {
+            self.tick_heartbeat();
+        } else {
+            self.tick_election();
+        }
+    }
+    fn tick_heartbeat(&mut self) {
+        self.heartbeat_elapsed += 1;
+        self.election_elapsed += 1;
+
+        self.handle_message(Message::AppendEntriesMessage)
+
+    }
+
+    fn tick_election(&mut self) {
+        self.election_elapsed += 1;
+
+    }
+
+    fn run(mut self) {
         let mut packet_as_bytes = [0; 1024];
+        let t = Instant::now();
         loop {
+            thread::sleep(Duration::from_millis(10));
             match self.socket.recv_from(&mut packet_as_bytes) {
                 Ok((recv_size, peer_addr)) => {
                     let filled_buffer = &mut packet_as_bytes[..recv_size];
@@ -176,6 +198,12 @@ impl Replica {
                     // }
                     println!("Received msg: {:?} bytes from peer: {peer_port}", msg);
                     let _ = self.handle_message(msg);
+
+                    if t.elapsed() >= Duration::from_millis(100) {
+
+                        self.tick();
+
+                    }
                 }
                 Err(e) => {
                     println!("Encountered error: {e}")
@@ -235,16 +263,17 @@ impl Replica {
                     "src": self.id,
                     "dst": rep,
                     "leader": self.id,
-                    "type":"fail"
+                    "type":"append_entries"
                 });
+                        println!("Sending append heartbeat to children: {rep}");
                         self.send(msg).expect("Failed to send back to heartbeat");
                     }
                 } else {
                     let msg = json!({
                     "src": self.id,
                     "dst": "0000",
-                    "leader": self.id,
-                    "type":"fail"
+                    "leader": "0000",
+                    "type":"append_entries"
                 });
                     self.send(msg).expect("Failed to send back to heartbeat");
                 }
