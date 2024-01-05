@@ -1,6 +1,6 @@
-use serde::{Deserialize, Serialize, Serializer};
 use crate::MessageType;
 use crate::Peer;
+use serde::{Deserialize, Serialize, Serializer};
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(tag = "type")]
 pub enum RecvMessage {
@@ -38,7 +38,7 @@ pub enum RecvMessage {
         dst: String,
         leader: String,
         mid: String,
-    }
+    },
 }
 
 #[derive(Serialize)]
@@ -47,22 +47,28 @@ pub struct Message {
     src: String,
     dst: String,
     leader: Peer,
-    #[serde(rename="type")]
+    #[serde(rename = "type")]
     msg_type: MessageType,
-    context: Vec<Context>
+    context: Vec<Context>,
 }
 
 pub struct Context(String, String);
 
 impl Serialize for Context {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         let v = vec![self.0.clone(), self.1.clone()];
         serializer.collect_seq(v)
     }
 }
 
 impl Serialize for MessageType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error> where S: Serializer {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
         match *self {
             MessageType::Get => serializer.collect_str("get"),
             MessageType::Put => serializer.collect_str("put"),

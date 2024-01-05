@@ -2,10 +2,9 @@ use clap::Parser;
 use raft_rs::RecvMessage;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::net::{IpAddr, Ipv4Addr};
+
 use std::time::{Duration, Instant};
 use std::{
-    io::{Read, Write},
     net::{SocketAddr, UdpSocket},
     thread,
 };
@@ -14,7 +13,7 @@ const BROADCAST: &str = "FFFF";
 
 fn main() {
     let cli = Cli::parse();
-    let mut rep = Replica::new(cli.port, cli.id, cli.others);
+    let rep = Replica::new(cli.port, cli.id, cli.others);
     rep.run();
 }
 
@@ -101,9 +100,9 @@ impl Replica {
                 StateRole::default()
             }
         };
-        let mut rep = Replica {
+        let rep = Replica {
             port,
-            id: id.into(),
+            id,
             role,
             leader_id: "0000".into(),
             others,
@@ -154,7 +153,7 @@ impl Replica {
 
     fn run(mut self) {
         let mut packet_as_bytes = [0; 1024];
-        let t = Instant::now();
+        let _t = Instant::now();
         loop {
             let t = Instant::now();
             thread::sleep(Duration::from_millis(10));
@@ -167,7 +166,7 @@ impl Replica {
                     let peer_port = peer_addr.port();
 
                     println!("Received msg: {:?} bytes from peer: {peer_port}", msg);
-                    let _ = self.handle_message(msg);
+                    self.handle_message(msg);
 
                     if t.elapsed() >= Duration::from_millis(100) {
                         self.tick();
@@ -182,7 +181,7 @@ impl Replica {
 
     fn handle_message(&self, msg: RecvMessage) {
         match msg {
-            RecvMessage::HelloMessage { src, dst, leader } => {
+            RecvMessage::HelloMessage { src, dst: _, leader: _ } => {
                 let msg = json!({
                     "src": self.id,
                     "dst": src,
@@ -193,10 +192,10 @@ impl Replica {
             }
             RecvMessage::GetMessage {
                 src,
-                dst,
-                leader,
+                dst: _,
+                leader: _,
                 mid,
-                key,
+                key: _,
             } => {
                 let msg = json!({
                     "src": self.id,
@@ -209,11 +208,11 @@ impl Replica {
             }
             RecvMessage::PutMessage {
                 src,
-                dst,
-                leader,
+                dst: _,
+                leader: _,
                 mid,
-                key,
-                value,
+                key: _,
+                value: _,
             } => {
                 let msg = json!({
                     "src": self.id,
