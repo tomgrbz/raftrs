@@ -1,9 +1,14 @@
 use clap::Parser;
+use raft_rs::RecvMessage;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::str::from_utf8;
+use std::net::{IpAddr, Ipv4Addr};
 use std::time::{Duration, Instant};
-use std::{io::{Read, Write}, net::{SocketAddr, UdpSocket}, thread};
+use std::{
+    io::{Read, Write},
+    net::{SocketAddr, UdpSocket},
+    thread,
+};
 
 const BROADCAST: &str = "FFFF";
 
@@ -46,38 +51,8 @@ struct Replica {
     election_elapsed: u8,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(tag = "type")]
-enum Message {
-    #[serde(rename = "hello")]
-    HelloMessage {
-        src: String,
-        dst: String,
-        leader: String,
-    },
-    #[serde(rename = "get")]
-    GetMessage {
-        src: String,
-        dst: String,
-        leader: String,
-        mid: String,
-        key: String,
-    },
-    #[serde(rename = "put")]
-    PutMessage {
-        src: String,
-        dst: String,
-        leader: String,
-        mid: String,
-        key: String,
-        value: String,
-    },
-    #[serde(rename = "ok")]
-    OkMessage,
-    #[serde(rename = "fail")]
-    FailMessage,
-    #[serde(rename = "append_entries")]
-    AppendEntriesMessage,
+struct Peer {
+    id: String,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -115,15 +90,17 @@ struct PutMessage {
 impl Replica {
     fn new(port: u16, id: String, others: Vec<String>) -> Self {
         let socket =
-            UdpSocket::bind(("127.0.0.1", port)).expect("Unable to create udp socket on localhost");
+            UdpSocket::bind(("localhost", port)).expect("Unable to create udp socket on localhost");
         let addr = socket.local_addr().expect("Failed to fetch local address");
-        println!("Succesfully created Replica");
+        println!("Successfully created Replica");
         //let others: Vec<String> = others.into_iter().map(|element| element.into()).collect();
-        let role = {if id == "0000" {
-            StateRole::Leader
-        } else {
-            StateRole::default()
-        }};
+        let role = {
+            if id == "0000" {
+                StateRole::Leader
+            } else {
+                StateRole::default()
+            }
+        };
         let mut rep = Replica {
             port,
             id: id.into(),
@@ -138,8 +115,8 @@ impl Replica {
         println!("Created Replica object");
         let msg = json!({
             "src": rep.id,
-            "dst": "FFFF",
-            "leader": "FFFF",
+            "dst": BROADCAST,
+            "leader": BROADCAST,
             "type":"hello"
         });
         rep.send(msg);
@@ -168,41 +145,32 @@ impl Replica {
         self.heartbeat_elapsed += 1;
         self.election_elapsed += 1;
 
-        self.handle_message(Message::AppendEntriesMessage)
-
+        self.handle_message(RecvMessage::AppendEntriesMessage)
     }
 
     fn tick_election(&mut self) {
         self.election_elapsed += 1;
-
     }
 
     fn run(mut self) {
         let mut packet_as_bytes = [0; 1024];
         let t = Instant::now();
         loop {
+            let t = Instant::now();
             thread::sleep(Duration::from_millis(10));
             match self.socket.recv_from(&mut packet_as_bytes) {
                 Ok((recv_size, peer_addr)) => {
                     let filled_buffer = &mut packet_as_bytes[..recv_size];
                     //let msg = from_utf8(filled_buffer).unwrap();//serde_json::from_slice(filled_buffer).unwrap();
-                    let msg: Message = serde_json::from_slice(filled_buffer).unwrap();
+                    let msg: RecvMessage = serde_json::from_slice(filled_buffer).unwrap();
                     //let msg_str = from_utf8(msg).unwrap();
                     let peer_port = peer_addr.port();
 
-                    // match msg.msg_type {
-                    //     MessageType::HelloMessage(msg_type) => todo!(),
-                    //     MessageType::GetMessage(msg_type) => todo!(),
-                    //     MessageType::PutMessage(msg_type) => todo!(),
-                    //
-                    // }
                     println!("Received msg: {:?} bytes from peer: {peer_port}", msg);
                     let _ = self.handle_message(msg);
 
                     if t.elapsed() >= Duration::from_millis(100) {
-
                         self.tick();
-
                     }
                 }
                 Err(e) => {
@@ -212,18 +180,18 @@ impl Replica {
         }
     }
 
-    fn handle_message(&self, msg: Message) {
+    fn handle_message(&self, msg: RecvMessage) {
         match msg {
-            Message::HelloMessage { src, dst, leader } => {
+            RecvMessage::HelloMessage { src, dst, leader } => {
                 let msg = json!({
                     "src": self.id,
                     "dst": src,
-                    "leader": "FFFF",
+                    "leader": BROADCAST,
                     "type":"ok"
                 });
                 self.send(msg).expect("Failed to send back to put");
             }
-            Message::GetMessage {
+            RecvMessage::GetMessage {
                 src,
                 dst,
                 leader,
@@ -233,13 +201,13 @@ impl Replica {
                 let msg = json!({
                     "src": self.id,
                     "dst": src,
-                    "leader": "FFFF",
+                    "leader": BROADCAST,
                         "MID": mid,
                     "type":"fail"
                 });
                 self.send(msg).expect("Failed to send back to put");
             }
-            Message::PutMessage {
+            RecvMessage::PutMessage {
                 src,
                 dst,
                 leader,
@@ -256,31 +224,29 @@ impl Replica {
                 });
                 self.send(msg).expect("Failed to send back to put");
             }
-            Message::AppendEntriesMessage => {
+            RecvMessage::AppendEntriesMessage => {
                 if self.role == StateRole::Leader {
                     for rep in self.others.iter() {
                         let msg = json!({
-                    "src": self.id,
-                    "dst": rep,
-                    "leader": self.id,
-                    "type":"append_entries"
-                });
+                            "src": self.id,
+                            "dst": rep,
+                            "leader": self.id,
+                            "type":"append_entries"
+                        });
                         println!("Sending append heartbeat to children: {rep}");
                         self.send(msg).expect("Failed to send back to heartbeat");
                     }
                 } else {
                     let msg = json!({
-                    "src": self.id,
-                    "dst": "0000",
-                    "leader": "0000",
-                    "type":"append_entries"
-                });
+                        "src": self.id,
+                        "dst": "0000",
+                        "leader": "0000",
+                        "type":"append_entries"
+                    });
                     self.send(msg).expect("Failed to send back to heartbeat");
                 }
+            }
 
-                }
-
-            
             _ => {}
         }
     }
