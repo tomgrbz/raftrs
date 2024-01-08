@@ -1,7 +1,19 @@
+use std::fmt::{Display, Formatter, Pointer};
 use serde::{Serialize, Serializer};
 
 pub struct Peer {
-    pub peer_id: String,
+    peer_id: String,
+}
+impl Peer {
+    pub fn new(id: String) -> Self {
+        Peer {
+            peer_id: id
+        }
+    }
+
+    fn get_peer_id(&self) -> String {
+        return self.peer_id.clone()
+    }
 }
 
 impl Serialize for Peer {
@@ -9,6 +21,12 @@ impl Serialize for Peer {
     where
         S: Serializer,
     {
-        serializer.collect_str(&self.peer_id)
+        serializer.collect_str(&self.get_peer_id())
+    }
+}
+
+impl Display for Peer {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.get_peer_id())
     }
 }

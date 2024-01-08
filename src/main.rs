@@ -1,5 +1,6 @@
 use clap::Parser;
-use raft_rs::RecvMessage;
+use raft_rs::{Message, RecvMessage};
+use raft_rs::Peer;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -8,6 +9,7 @@ use std::{
     net::{SocketAddr, UdpSocket},
     thread,
 };
+use std::fmt::{Display, Formatter};
 
 const BROADCAST: &str = "FFFF";
 
@@ -42,49 +44,40 @@ struct Replica {
     port: u16,
     id: String,
     role: StateRole,
-    others: Vec<String>,
+    others: Vec<Peer>,
     leader_id: String,
-    socket: UdpSocket,
-    addr: SocketAddr,
+    conn: ConnInfo,
     heartbeat_elapsed: u8,
     election_elapsed: u8,
 }
 
-struct Peer {
-    id: String,
+
+
+struct ConnInfo {
+    socket: UdpSocket,
+    addr: SocketAddr,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct HelloMessage {
-    src: String,
-    dst: String,
-    leader: String,
-    #[serde(rename = "type")]
-    msg_type: String,
+impl ConnInfo {
+    pub fn send_msg(&self, buf: &[u8]) -> Result<usize, std::io::Error> {
+        self.socket.send_to(buf, self.addr)
+
+    }
+
+    pub fn recv_msg(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
+        self.socket.recv_from(buf)
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct GetMessage {
-    src: String,
-    dst: String,
-    leader: String,
-    #[serde(rename = "type")]
-    msg_type: String,
-    mid: String,
-    key: String,
+impl Display for ConnInfo {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Addr: {}", self.addr)
+    }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct PutMessage {
-    src: String,
-    dst: String,
-    leader: String,
-    #[serde(rename = "type")]
-    msg_type: String,
-    mid: String,
-    key: String,
-    value: String,
-}
+
+
+
 
 impl Replica {
     fn new(port: u16, id: String, others: Vec<String>) -> Self {
@@ -100,18 +93,26 @@ impl Replica {
                 StateRole::default()
             }
         };
+        let mut peers = Vec::new();
+        for peer in others {
+            peers.push(Peer::new(peer));
+        }
+        let conn = ConnInfo {
+            socket,
+            addr
+        };
         let rep = Replica {
             port,
             id,
             role,
             leader_id: "0000".into(),
-            others,
-            socket,
-            addr,
+            others: peers,
+            conn,
             election_elapsed: 0,
             heartbeat_elapsed: 0,
         };
         println!("Created Replica object");
+        let mut msg = Message::default();
         let msg = json!({
             "src": rep.id,
             "dst": BROADCAST,
@@ -125,7 +126,7 @@ impl Replica {
     fn send(&self, message: Value) -> Result<usize, String> {
         let message =
             serde_json::to_string(&message).expect("Failed to parse json value to string");
-        match self.socket.send_to(message.as_bytes(), self.addr) {
+        match self.conn.send_msg(message.as_bytes()) {
             Ok(payload_size) => Ok(payload_size),
             Err(_) => {
                 println!("Could not send message on socket.");
@@ -157,7 +158,7 @@ impl Replica {
         loop {
             let t = Instant::now();
             thread::sleep(Duration::from_millis(10));
-            match self.socket.recv_from(&mut packet_as_bytes) {
+            match self.conn.recv_msg(&mut packet_as_bytes) {
                 Ok((recv_size, peer_addr)) => {
                     let filled_buffer = &mut packet_as_bytes[..recv_size];
                     //let msg = from_utf8(filled_buffer).unwrap();//serde_json::from_slice(filled_buffer).unwrap();

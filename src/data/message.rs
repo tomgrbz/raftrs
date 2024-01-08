@@ -51,7 +51,26 @@ pub struct Message {
     msg_type: MessageType,
     context: Vec<Context>,
 }
+impl Message {
+    pub fn new(mid: String, src: String, dst: String, leader: Peer, msg_type: MessageType, context: Vec<Context>) -> Message {
+        Message {
+            mid,
+            src,
+            dst,
+            leader,
+            msg_type,
+            context
+        }
+    }
+}
+impl Default for Message {
+    fn default() -> Self {
+        todo!()
+    }
+}
 
+
+#[derive(Clone)]
 pub struct Context(String, String);
 
 impl Serialize for Context {
@@ -59,8 +78,15 @@ impl Serialize for Context {
     where
         S: Serializer,
     {
-        let v = vec![self.0.clone(), self.1.clone()];
-        serializer.collect_seq(v)
+        serializer.collect_map(self.clone().into_iter())
+    }
+}
+
+impl IntoIterator for Context {
+    type Item = (String, String);
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+    fn into_iter(self) -> Self::IntoIter {
+        vec![(self.0.clone(), self.1.clone())].into_iter()
     }
 }
 
@@ -78,10 +104,5 @@ impl Serialize for MessageType {
             MessageType::AppendEntries => serializer.collect_str("append_entries"),
             MessageType::HeartBeat => serializer.collect_str("heartbeat"),
         }
-    }
-}
-impl Default for Message {
-    fn default() -> Self {
-        todo!()
     }
 }
