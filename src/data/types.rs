@@ -1,18 +1,17 @@
-use std::fmt::{Display, Formatter, Pointer};
 use serde::{Serialize, Serializer};
+use std::fmt::{Display, Formatter};
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Peer {
     peer_id: String,
 }
 impl Peer {
     pub fn new(id: String) -> Self {
-        Peer {
-            peer_id: id
-        }
+        Peer { peer_id: id }
     }
 
-    fn get_peer_id(&self) -> String {
-        return self.peer_id.clone()
+    pub fn get_peer_id(&self) -> String {
+        self.peer_id.clone()
     }
 }
 
