@@ -1,25 +1,50 @@
-use std::fmt::{Display, Formatter};
-use std::net::{SocketAddr, UdpSocket};
-use std::time::Duration;
 use anyhow::Result;
+use std::fmt::{Display, Formatter};
+use std::io;
+use tokio::net::UdpSocket;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::Duration;
 pub struct ConnInfo {
     socket: UdpSocket,
     addr: SocketAddr,
+    remote_sock: SocketAddr,
 }
 
 impl ConnInfo {
-    pub fn new(port: u16) -> Self {
+    pub async fn new(port: u16) -> Result<Self> {
         let socket =
-            UdpSocket::bind(("localhost", port)).expect("Unable to create udp socket on localhost");
+            UdpSocket::bind(("127.0.0.1", 0)).await?;
         let addr = socket.local_addr().expect("Failed to fetch local address");
-        ConnInfo { socket, addr }
+
+        let remote_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), port);
+        Ok(ConnInfo { socket, addr, remote_sock: remote_addr })
     }
-    pub fn send_msg(&self, buf: &[u8]) -> Result<usize, std::io::Error> {
-        self.socket.send_to(buf, self.addr)
+    pub async fn send_msg(&self, buf: &[u8]) -> std::io::Result<usize> {
+        loop {
+            self.socket.writable().await?;
+            println!("Sending now to {:?}", self.remote_sock);
+            match self.socket.try_send_to(buf, self.remote_sock) {
+                Ok(n) => {
+                    return Ok(n);
+                },
+                Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                    continue;
+                },
+                Err(e) => {
+                    return Err(e);
+                }
+            }
+        }
     }
 
-    pub fn recv_msg(&self, buf: &mut [u8]) -> Result<(usize, SocketAddr), std::io::Error> {
-        self.socket.recv_from(buf)
+    pub fn recv_msg(&self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let (len, _) = self.socket.try_recv_from(buf)?;
+        Ok(len)
+    }
+
+    pub async fn ready_to_read(&self) -> Result<()> {
+        self.socket.readable().await?;
+        Ok(())
     }
 }
 

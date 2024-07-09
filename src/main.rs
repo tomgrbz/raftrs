@@ -1,10 +1,11 @@
 use clap::Parser;
 use raft_rs::{
-    ConnInfo, ConnectionGroup, FailMessage, GetMessage, Message, MessageType, PutMessage,
+    AppendEntriesMessage, ConnInfo, ConnectionGroup, FailMessage, GetMessage, Message, MessageType, PutMessage
 };
 use raft_rs::{HelloMessage, Peer};
 
 use anyhow::{anyhow, Result};
+use tokio::time;
 
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
@@ -23,16 +24,17 @@ fn rand_string() -> String {
 fn rand_jitter() -> Ticks {
     use rand::{thread_rng, Rng};
     let mut rng = thread_rng();
-    rng.gen_range(60..=150)
+    rng.gen_range(20..=80)
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     let cli = Cli::parse();
-    let conn_info = ConnInfo::new(cli.port);
+    let conn_info = ConnInfo::new(cli.port).await.expect("Failed to bind to socket");
     let conn_group = ConnectionGroup::new(conn_info);
-    let mut rep = Replica::new(cli.port, cli.id, cli.others, conn_group).unwrap();
+    let mut rep = Replica::new(cli.port, cli.id, cli.others, conn_group).await.unwrap();
 
-    rep.run();
+    rep.run().await.unwrap();
 }
 
 #[derive(Parser)]
@@ -87,7 +89,7 @@ struct Replica {
 }
 
 impl Replica {
-    fn new(
+    async fn new(
         port: u16,
         id: String,
         others: Vec<impl Into<String>>,
@@ -139,55 +141,69 @@ impl Replica {
             mid: rand_string(),
         });
 
-        let _ = rep.send(msg).unwrap();
+        let _ = rep.send(msg).await.unwrap();
         println!("Created Replica object and sent hello");
         Ok(rep)
     }
 
-    fn send(&self, message: Message) -> Result<()> {
-        match self.conn.send_message(message) {
+    async fn send(&self, message: Message) -> Result<()> {
+        match self.conn.send_message(message).await {
             Ok(_) => Ok(()),
-            Err(_) => Err(anyhow!("Failed to send msg")),
+            Err(e) => Err(anyhow!("Failed to send msg, with {e}")),
         }
     }
-    fn tick(&mut self) {
+    async fn tick(&mut self) {
         println!("ticking now from id: {}", self.id);
         if let StateRole::Leader(LeaderState { .. }) = self.role {
-            self.tick_heartbeat();
+            self.tick_heartbeat().await;
         } else {
-            self.tick_election();
+            self.tick_election().await;
         }
     }
-    fn tick_heartbeat(&mut self) {
-        todo!()
+    async fn tick_heartbeat(&mut self) {
+        for peer in self.others.iter() {
+            let act = AppendEntriesMessage {
+                src: self.id.clone(),
+                dst: peer.get_peer_id(),
+                leader: self.id.clone(),
+                mid: rand_string(),
+            };
+            let message = Message::AppendEntries(act);
+            if let Err(e) = self.send(message).await {
+                panic!("Failed to send to {peer}");
+            }
+        }
 
         //self.handle_message(&RecvMessage::AppendEntriesMessage)
     }
 
-    fn tick_election(&mut self) {
+    async fn tick_election(&mut self) {
         todo!()
     }
 
-    fn run(&mut self) -> Result<()> {
+    async fn run(&mut self) -> Result<()> {
+
         let mut time = Instant::now();
         loop {
-            let recv = self.conn.capture_recv_messages();
+            
+            let recv = self.conn.capture_recv_messages().await;
 
             match recv {
-                Ok(msg) => self.handle_message(&msg),
-                Err(e) => return  Err(e),
+                Ok(msg) => self.handle_message(&msg).await,
+                Err(e) => eprintln!("Failed to recv msg {e}"),
             };
             match self.role {
                 StateRole::Candidate(CandidateState { election_time, .. })
                 | StateRole::Follower(FollowerState { election_time, .. }) => {
                     if time.elapsed() > Duration::from_millis(election_time) {
-                        self.tick();
+                        println!("leader sending heartbeat");
+                        self.tick().await;
                         time = Instant::now();
                     }
                 }
                 StateRole::Leader(LeaderState { heartbeat, .. }) => {
                     if time.elapsed() > Duration::from_millis(heartbeat) {
-                        self.tick();
+                        self.tick().await;
                         time = Instant::now();
                     }
                 }
@@ -196,31 +212,35 @@ impl Replica {
         Ok(())
     }
 
-    fn handle_message(&self, msg: &Message) {
-        println!("{msg}");
+    async fn handle_message(&self, msg: &Message) {
+        println!("handling now {msg}");
         match msg {
             Message::Get(GetMessage {
                 src,
                 dst,
                 leader,
                 mid,
-                key,
+                ..
             })
             | Message::Put(PutMessage {
                 src,
                 dst,
                 leader,
                 mid,
-                key,
                 ..
-            }) => {
+            })
+            | Message::AppendEntries(AppendEntriesMessage { 
+                src, 
+                dst, 
+                leader, 
+                mid }) => {
                 let msg = Message::Fail(FailMessage {
                     src: self.id.clone(),
                     dst: src.into(),
                     leader: self.leader.get_peer_id(),
                     mid: mid.into(),
                 });
-                self.conn.send_message(msg);
+                let _ = self.conn.send_message(msg).await;
             }
 
             _ => {}
@@ -234,10 +254,10 @@ mod tests {
 
     use crate::Replica;
 
-    #[test]
-    fn test_new_replica() {
-        let conn_info = ConnInfo::new(9090);
+    #[tokio::test]
+    async fn test_new_replica() {
+        let conn_info = ConnInfo::new(9090).await.unwrap();
         let conn = ConnectionGroup::new(conn_info);
-        let r = Replica::new(9090, "id".into(), vec!["1209", "1231"], conn).unwrap();
+        let r = Replica::new(9090, "id".into(), vec!["1209", "1231"], conn).await.unwrap();
     }
 }

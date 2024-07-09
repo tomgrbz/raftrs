@@ -13,3 +13,4 @@ serde_test = "*"
 thiserror = "*"
 anyhow = "*"
 rand = "*"
+tokio = { version = "*", features = ["full"] }

@@ -63,6 +63,15 @@ pub struct RedirectMessage {
     #[serde(rename = "MID")]
     pub mid: String,
 }
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AppendEntriesMessage {
+    pub src: String,
+    pub dst: String,
+    pub leader: String,
+    #[serde(rename = "MID")]
+    pub mid: String,
+}
+
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type")]
@@ -78,7 +87,7 @@ pub enum Message {
     #[serde(rename = "fail")]
     Fail(FailMessage),
     #[serde(rename = "append_entries")]
-    AppendEntriesMessage,
+    AppendEntries(AppendEntriesMessage),
     #[serde(rename = "redirect")]
     Redirect(RedirectMessage),
 }
