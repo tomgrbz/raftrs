@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 
+use crate::{Log, LogEntry, Term};
+
 impl Display for Message {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self)
@@ -70,8 +72,46 @@ pub struct AppendEntriesMessage {
     pub leader: String,
     #[serde(rename = "MID")]
     pub mid: String,
+    pub term: Term,
+    pub prev_log_term: Term,
+    pub prev_log_index: usize,
+    pub entries: Vec<LogEntry>,
+    pub leader_commit_idx: usize,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct AppendEntriesMessageResponse {
+    pub src: String,
+    pub dst: String,
+    pub leader: String,
+    #[serde(rename = "MID")]
+    pub mid: String,
+    pub term: Term,
+    pub success: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct RequestVoteMessage {
+    pub src: String,
+    pub dst: String,
+    pub leader: String,
+    #[serde(rename = "MID")]
+    pub mid: String,
+    pub candidate_term: Term,
+    pub last_log_idx: usize,
+    pub last_log_term: Term,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct RequestVoteResponseMessage {
+    pub src: String,
+    pub dst: String,
+    pub leader: String,
+    #[serde(rename = "MID")]
+    pub mid: String,
+    pub term: Term,
+    pub voted_granted: bool,
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type")]
@@ -88,8 +128,14 @@ pub enum Message {
     Fail(FailMessage),
     #[serde(rename = "append_entries")]
     AppendEntries(AppendEntriesMessage),
+    #[serde(rename = "append_entries_response")]
+    AppendEntriesResponse(AppendEntriesMessageResponse),
     #[serde(rename = "redirect")]
     Redirect(RedirectMessage),
+    #[serde(rename = "request_vote")]
+    RequestVote(RequestVoteMessage),
+    #[serde(rename = "request_vote_response")]
+    RequestVoteResponse(RequestVoteResponseMessage),
 }
 
 // impl Message {

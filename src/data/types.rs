@@ -29,3 +29,9 @@ impl Display for Peer {
         write!(f, "{}", self.get_peer_id())
     }
 }
+
+impl From<&str> for Peer {
+    fn from(value: &str) -> Self {
+        Peer::new(value.into())
+    }
+}

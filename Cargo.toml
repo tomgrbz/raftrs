@@ -14,3 +14,4 @@ thiserror = "*"
 anyhow = "*"
 rand = "*"
 tokio = { version = "*", features = ["full"] }
+futures = "*"

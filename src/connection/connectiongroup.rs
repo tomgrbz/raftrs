@@ -1,5 +1,5 @@
-use crate::connection::ConnInfo;
 use crate::Message;
+use crate::{connection::ConnInfo, Target};
 use anyhow::{anyhow, Context, Result};
 use std::{
     io,
@@ -59,7 +59,6 @@ impl ConnectionGroup {
     }
     pub async fn send_message(&self, msg: Message) -> Result<()> {
         let message = serde_json::to_string(&msg).expect("Failed to parse json value to string");
-        println!("Sending now: {message}");
         self.connection_info.send_msg(message.as_bytes()).await?;
         Ok(())
     }
