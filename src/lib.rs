@@ -1,11 +1,15 @@
 pub mod connection;
 pub mod data;
+pub mod state;
+pub mod utils;
 
 use std::collections::HashMap;
 
 pub use connection::*;
 pub use data::*;
 use serde::{Deserialize, Serialize};
+pub use state::*;
+pub use utils::*;
 
 pub type Ticks = u64;
 pub const BROADCAST: &str = "FFFF";
@@ -16,6 +20,7 @@ pub enum Target {
     BroadCast,
 }
 
+#[derive(Debug)]
 pub struct Log {
     pub entries: Vec<LogEntry>,
     state: HashMap<String, LogEntry>,

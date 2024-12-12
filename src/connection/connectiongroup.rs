@@ -1,14 +1,13 @@
+use std::io;
+
+use crate::connection::ConnInfo;
 use crate::Message;
-use crate::{connection::ConnInfo, Target};
-use anyhow::{anyhow, Context, Result};
-use std::{
-    io,
-    net::{SocketAddr, UdpSocket},
-};
+use anyhow::{anyhow, Result};
 
 /// The boundary checker holding connection info and the socket for a Raft Replica.
 /// Responsible for receiving packets on a UDP connection and then sending those as deserialized
 /// `Message` types to the main Replica
+#[derive(Debug)]
 pub struct ConnectionGroup {
     connection_info: ConnInfo,
 }

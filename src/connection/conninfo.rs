@@ -4,8 +4,7 @@ use std::io;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use tokio::net::UdpSocket;
 
-use crate::Target;
-
+#[derive(Debug)]
 pub struct ConnInfo {
     socket: UdpSocket,
     addr: SocketAddr,
