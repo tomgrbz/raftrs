@@ -12,6 +12,12 @@ pub struct ConnectionGroup {
     connection_info: ConnInfo,
 }
 
+pub trait Connection {
+    async fn capture_recv_messages(&self) -> Result<Message>;
+
+    async fn send_message(&self, msg: Message) -> Result<()>;
+}
+
 #[derive(thiserror::Error, Debug)]
 pub enum ConnError {
     #[error("Failed to deserialize message")]
@@ -26,7 +32,9 @@ impl ConnectionGroup {
             connection_info: conn_info,
         }
     }
-    pub async fn capture_recv_messages(&self) -> Result<Message> {
+}
+impl Connection for ConnectionGroup {
+     async fn capture_recv_messages(&self) -> Result<Message> {
         loop {
             // Wait for socket to be ready to read from
             self.connection_info.ready_to_read().await?;
@@ -56,8 +64,9 @@ impl ConnectionGroup {
             }
         }
     }
-    pub async fn send_message(&self, msg: Message) -> Result<()> {
+     async fn send_message(&self, msg: Message) -> Result<()> {
         let message = serde_json::to_string(&msg).expect("Failed to parse json value to string");
+        println!("Sent msg from {}", msg.get_src());
         self.connection_info.send_msg(message.as_bytes()).await?;
         Ok(())
     }

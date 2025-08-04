@@ -1,6 +1,16 @@
+use std::{
+    collections::{HashMap, HashSet},
+    time::{Duration, Instant},
+};
+
 use super::StateRole;
-use crate::{rand_jitter, ConnectionGroup, FollowerState, Log, Peer, Term};
-use anyhow::Result;
+use crate::{
+    rand_heartbeat_inteval, rand_jitter, rand_string, AppendEntriesMessage,
+    AppendEntriesMessageResponse, CandidateState, ConnectionGroup, FailMessage, FollowerState,
+    GetMessage, HelloMessage, LeaderState, Log, Message, Peer, PutMessage, RequestVoteMessage,
+    RequestVoteResponseMessage, Term, VolatileState, BROADCAST,
+};
+use anyhow::{anyhow, Result};
 
 #[derive(Debug)]
 pub struct Replica {
@@ -15,7 +25,6 @@ pub struct Replica {
 
 impl Replica {
     pub async fn new(
-        port: u16,
         id: String,
         others: Vec<impl Into<String>>,
         conn: ConnectionGroup,
@@ -200,7 +209,7 @@ impl Replica {
         Ok(())
     }
 
-    async fn run(&mut self) -> Result<()> {
+    pub async fn run(&mut self) -> Result<()> {
         let mut time = Instant::now();
         loop {
             let recv = self.conn.capture_recv_messages().await;
@@ -381,15 +390,29 @@ impl Replica {
 
 #[cfg(test)]
 mod tests {
-    use raft_rs::{ConnInfo, ConnectionGroup};
+    use crate::{connection, ConnInfo, Connection, ConnectionGroup, Message};
 
     use crate::Replica;
+
+    struct MockConnGrp {}
+
+    impl Connection for MockConnGrp {
+        fn capture_recv_messages(&self) -> Result<Message> {
+            return Ok(
+                Message::Hello()
+            )
+        }
+
+         fn send_message(&self, msg: Message) -> impl Future<Output = anyhow::Result<()>> {
+            
+        }
+    }
 
     #[tokio::test]
     async fn test_new_replica() {
         let conn_info = ConnInfo::new(9090).await.unwrap();
         let conn = ConnectionGroup::new(conn_info);
-        let r = Replica::new(9090, "id".into(), vec!["1209", "1231"], conn)
+        let r = Replica::new("id".into(), vec!["1209", "1231"], conn)
             .await
             .unwrap();
     }

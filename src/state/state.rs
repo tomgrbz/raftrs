@@ -14,20 +14,20 @@ pub enum StateRole {
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct LeaderState {
-    followers: HashMap<Peer, VolatileState>,
-    heartbeat: Ticks,
+    pub followers: HashMap<Peer, VolatileState>,
+    pub heartbeat: Ticks,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CandidateState {
-    election_time: Ticks,
-    votes_recv: HashSet<Peer>,
+    pub election_time: Ticks,
+    pub votes_recv: HashSet<Peer>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FollowerState {
-    election_time: Ticks,
-    leader: Option<Peer>,
+    pub election_time: Ticks,
+    pub leader: Option<Peer>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]

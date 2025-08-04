@@ -138,6 +138,23 @@ pub enum Message {
     RequestVoteResponse(RequestVoteResponseMessage),
 }
 
+impl Message {
+    pub fn get_src(&self) -> &str {
+        match self {
+            Message::Hello(msg) => &msg.src,
+            Message::Get(msg) => &msg.src,
+            Message::Put(msg) => &msg.src,
+            Message::Ok(msg) => &msg.src,
+            Message::Fail(msg) => &msg.src,
+            Message::AppendEntries(msg) => &msg.src,
+            Message::AppendEntriesResponse(msg) => &msg.src,
+            Message::Redirect(msg) => &msg.src,
+            Message::RequestVote(msg) => &msg.src,
+            Message::RequestVoteResponse(msg) => &msg.src,
+        }
+    }
+}
+
 // impl Message {
 //     pub fn new(
 //         mid: Option<String>,

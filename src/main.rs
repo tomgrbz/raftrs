@@ -8,9 +8,7 @@ async fn main() {
         .await
         .expect("Failed to bind to socket");
     let conn_group = ConnectionGroup::new(conn_info);
-    let mut rep = Replica::new(cli.port, cli.id, cli.others, conn_group)
-        .await
-        .unwrap();
+    let mut rep = Replica::new(cli.id, cli.others, conn_group).await.unwrap();
 
     rep.run().await.unwrap();
 }

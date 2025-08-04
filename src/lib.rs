@@ -50,6 +50,17 @@ impl Log {
     pub fn get_last_term(&self) -> Term {
         self.entries.last().map(|entry| entry.term).unwrap_or(0)
     }
+}   
+
+impl Default for Log {
+    fn default() -> Self {
+        return Self {
+            entries: Vec::default(),
+            state: HashMap::default(),
+            committed_len: 0,
+            applied_len: 0,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

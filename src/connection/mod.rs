@@ -1,5 +1,5 @@
 mod connectiongroup;
 mod conninfo;
 
-pub use connectiongroup::ConnectionGroup;
+pub use connectiongroup::{Connection, ConnectionGroup};
 pub use conninfo::ConnInfo;
