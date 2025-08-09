@@ -10,68 +10,68 @@ impl Display for Message {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct HelloMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct HelloMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
+    pub mid: &'a str,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct GetMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct GetMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
-    pub key: String,
+    pub mid: &'a str,
+    pub key: &'a str,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct PutMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct PutMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
-    pub key: String,
-    pub value: String,
+    pub mid: &'a str,
+    pub key: &'a str,
+    pub value: &'a str,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct OkMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct OkMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
+    pub mid: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub value: Option<String>,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct FailMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct FailMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
+    pub mid: &'a str,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct RedirectMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct RedirectMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
+    pub mid: &'a str,
 }
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct AppendEntriesMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct AppendEntriesMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
+    pub mid: &'a str,
     pub term: Term,
     pub prev_log_term: Term,
     pub prev_log_index: usize,
@@ -80,66 +80,66 @@ pub struct AppendEntriesMessage {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct AppendEntriesMessageResponse {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct AppendEntriesMessageResponse<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
+    pub mid: &'a str,
     pub term: Term,
     pub success: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct RequestVoteMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct RequestVoteMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
+    pub mid: &'a str,
     pub candidate_term: Term,
     pub last_log_idx: usize,
     pub last_log_term: Term,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
-pub struct RequestVoteResponseMessage {
-    pub src: String,
-    pub dst: String,
-    pub leader: String,
+pub struct RequestVoteResponseMessage<'a> {
+    pub src: &'a str,
+    pub dst: &'a str,
+    pub leader: &'a str,
     #[serde(rename = "MID")]
-    pub mid: String,
+    pub mid: &'a str,
     pub term: Term,
     pub voted_granted: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "type")]
-pub enum Message {
+pub enum Message<'a> {
     #[serde(rename = "hello")]
-    Hello(HelloMessage),
+    Hello(HelloMessage<'a>),
     #[serde(rename = "get")]
-    Get(GetMessage),
+    Get(GetMessage<'a>),
     #[serde(rename = "put")]
-    Put(PutMessage),
+    Put(PutMessage<'a>),
     #[serde(rename = "ok")]
-    Ok(OkMessage),
+    Ok(OkMessage<'a>),
     #[serde(rename = "fail")]
-    Fail(FailMessage),
+    Fail(FailMessage<'a>),
     #[serde(rename = "append_entries")]
-    AppendEntries(AppendEntriesMessage),
+    AppendEntries(AppendEntriesMessage<'a>),
     #[serde(rename = "append_entries_response")]
-    AppendEntriesResponse(AppendEntriesMessageResponse),
+    AppendEntriesResponse(AppendEntriesMessageResponse<'a>),
     #[serde(rename = "redirect")]
-    Redirect(RedirectMessage),
+    Redirect(RedirectMessage<'a>),
     #[serde(rename = "request_vote")]
-    RequestVote(RequestVoteMessage),
+    RequestVote(RequestVoteMessage<'a>),
     #[serde(rename = "request_vote_response")]
-    RequestVoteResponse(RequestVoteResponseMessage),
+    RequestVoteResponse(RequestVoteResponseMessage<'a>),
 }
 
-impl Message {
-    pub fn get_src(&self) -> &str {
+impl<'a> Message<'a> {
+    pub fn get_src(&'a self) -> &'a str {
         match self {
             Message::Hello(msg) => &msg.src,
             Message::Get(msg) => &msg.src,
@@ -158,8 +158,8 @@ impl Message {
 // impl Message {
 //     pub fn new(
 //         mid: Option<String>,
-//         src: String,
-//         dst: String,
+//         src: &'a str,
+//         dst: &'a str,
 //         leader: Peer,
 //         msg_type: MessageType,
 //         context: Contexts,

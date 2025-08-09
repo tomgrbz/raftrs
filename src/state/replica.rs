@@ -6,15 +6,15 @@ use std::{
 use super::StateRole;
 use crate::{
     rand_heartbeat_inteval, rand_jitter, rand_string, AppendEntriesMessage,
-    AppendEntriesMessageResponse, CandidateState, ConnectionGroup, FailMessage, FollowerState,
-    GetMessage, HelloMessage, LeaderState, Log, Message, Peer, PutMessage, RequestVoteMessage,
-    RequestVoteResponseMessage, Term, VolatileState, BROADCAST,
+    AppendEntriesMessageResponse, CandidateState, Connection, ConnectionGroup, FailMessage,
+    FollowerState, GetMessage, HelloMessage, LeaderState, Log, Message, Peer, PutMessage,
+    RequestVoteMessage, RequestVoteResponseMessage, Term, VolatileState, BROADCAST,
 };
 use anyhow::{anyhow, Result};
 
 #[derive(Debug)]
-pub struct Replica {
-    conn: ConnectionGroup,
+pub struct Replica<Conn: Connection> {
+    conn: Conn,
     id: String,
     role: StateRole,
     others: Vec<Peer>,
@@ -23,41 +23,13 @@ pub struct Replica {
     pub term: Term,
 }
 
-impl Replica {
-    pub async fn new(
-        id: String,
-        others: Vec<impl Into<String>>,
-        conn: ConnectionGroup,
-    ) -> Result<Self> {
+impl<Conn: Connection> Replica<Conn> {
+    pub async fn new(id: String, others: Vec<impl Into<String>>, conn: Conn) -> Result<Self> {
         let mut peers = Vec::new();
         for peer in others {
             peers.push(Peer::new(peer.into()));
         }
 
-        // let role = {
-        //     if id == "0000" {
-        //         let mut followers = HashMap::new();
-        //         for peer in peers.iter() {
-        //             followers.insert(
-        //                 peer.clone(),
-        //                 VolatileState {
-        //                     next_index: 1,
-        //                     match_index: 0,
-        //                 },
-        //             );
-        //         }
-
-        //         StateRole::Leader(LeaderState {
-        //             followers: followers,
-        //             heartbeat: rand_heartbeat_inteval(),
-        //         })
-        //     } else {
-        //         StateRole::Follower(FollowerState {
-        //             election_time: rand_jitter(),
-        //             leader: None,
-        //         })
-        //     }
-        // };
         let role = {
             StateRole::Follower(FollowerState {
                 election_time: rand_jitter(),
@@ -73,12 +45,12 @@ impl Replica {
             log: Log::new(),
             term: 0,
         };
-
+        let mid = &rand_string();
         let msg = Message::Hello(HelloMessage {
-            src: rep.id.clone(),
-            dst: BROADCAST.into(),
-            leader: BROADCAST.into(),
-            mid: rand_string(),
+            src: &rep.id,
+            dst: BROADCAST,
+            leader: BROADCAST,
+            mid: mid,
         });
 
         let _ = rep.send(msg).await.unwrap();
@@ -90,7 +62,7 @@ impl Replica {
         self.others.len() / 2 + 1
     }
 
-    async fn send(&self, message: Message) -> Result<()> {
+    async fn send<'a>(&self, message: Message<'a>) -> Result<()> {
         match self.conn.send_message(message).await {
             Ok(_) => Ok(()),
             Err(e) => Err(anyhow!("Failed to send msg, with {e}")),
@@ -119,12 +91,14 @@ impl Replica {
 
             for (follower, state) in followers.iter() {
                 let prev_idx = state.next_index;
-
+                let mid = &rand_string();
+                let follower_id = &follower.get_peer_id();
+                
                 let act = AppendEntriesMessage {
-                    src: self.id.clone(),
-                    dst: follower.get_peer_id(),
-                    leader: self.id.clone(),
-                    mid: rand_string(),
+                    src: &self.id,
+                    dst: &follower_id,
+                    leader: &self.id,
+                    mid: mid,
                     term: self.term,
                     prev_log_index: prev_idx,
                     prev_log_term: self.log.entries.get(prev_idx - 1).unwrap().term,
@@ -393,19 +367,26 @@ mod tests {
     use crate::{connection, ConnInfo, Connection, ConnectionGroup, Message};
 
     use crate::Replica;
+    use anyhow::Result;
 
-    struct MockConnGrp {}
+    struct MockConnGrp {
+        src: String,
+        dst: String,
+        leader: String,
+        mid: String,
+    }
 
     impl Connection for MockConnGrp {
-        fn capture_recv_messages(&self) -> Result<Message> {
-            return Ok(
-                Message::Hello()
-            )
+        async fn capture_recv_messages(&self) -> Result<Message> {
+            return Ok(Message::Hello(crate::HelloMessage {
+                src: self.src,
+                dst: self.dst,
+                leader: self.leader,
+                mid: self.mid,
+            }));
         }
 
-         fn send_message(&self, msg: Message) -> impl Future<Output = anyhow::Result<()>> {
-            
-        }
+        async fn send_message(&self, msg: Message) -> anyhow::Result<()> {}
     }
 
     #[tokio::test]
