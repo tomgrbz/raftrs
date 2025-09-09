@@ -11,6 +11,7 @@ use crate::{
     RequestVoteMessage, RequestVoteResponseMessage, Term, VolatileState, BROADCAST,
 };
 use anyhow::{anyhow, Result};
+use tokio::signal;
 
 #[derive(Debug)]
 pub struct Replica<Conn: Connection> {
@@ -29,10 +30,10 @@ impl<Conn: Connection> Replica<Conn> {
         for peer in others {
             peers.push(Peer::new(peer.into()));
         }
-
+        let rand_timeout = rand_jitter(None);
         let role = {
             StateRole::Follower(FollowerState {
-                election_time: rand_jitter(),
+                election_time: rand_timeout,
                 leader: None,
             })
         };
@@ -45,16 +46,7 @@ impl<Conn: Connection> Replica<Conn> {
             log: Log::new(),
             term: 0,
         };
-        let mid = &rand_string();
-        let msg = Message::Hello(HelloMessage {
-            src: &rep.id,
-            dst: BROADCAST,
-            leader: BROADCAST,
-            mid: mid,
-        });
-
-        let _ = rep.send(msg).await.unwrap();
-        println!("Created Replica object and sent hello");
+        println!("Created Replica object");
         Ok(rep)
     }
 
@@ -62,7 +54,7 @@ impl<Conn: Connection> Replica<Conn> {
         self.others.len() / 2 + 1
     }
 
-    async fn send<'a>(&self, message: Message<'a>) -> Result<()> {
+    async fn send(&mut self, message: Message) -> Result<()> {
         match self.conn.send_message(message).await {
             Ok(_) => Ok(()),
             Err(e) => Err(anyhow!("Failed to send msg, with {e}")),
@@ -80,7 +72,7 @@ impl<Conn: Connection> Replica<Conn> {
         self.replicate_log().await;
     }
 
-    async fn replicate_log(&mut self) {
+    async fn replicate_log(&mut self) -> Result<()> {
         let mut messages_to_send = Vec::new();
         if let StateRole::Leader(LeaderState {
             followers,
@@ -91,13 +83,13 @@ impl<Conn: Connection> Replica<Conn> {
 
             for (follower, state) in followers.iter() {
                 let prev_idx = state.next_index;
-                let mid = &rand_string();
-                let follower_id = &follower.get_peer_id();
-                
+                let mid = rand_string();
+                let follower_id = follower.get_peer_id();
+
                 let act = AppendEntriesMessage {
-                    src: &self.id,
-                    dst: &follower_id,
-                    leader: &self.id,
+                    src: self.id.clone(),
+                    dst: follower_id,
+                    leader: self.id.clone(),
                     mid: mid,
                     term: self.term,
                     prev_log_index: prev_idx,
@@ -109,7 +101,18 @@ impl<Conn: Connection> Replica<Conn> {
                 messages_to_send.push(message);
             }
         }
-        futures::future::join_all(messages_to_send.into_iter().map(|msg| self.send(msg))).await;
+        if let Err(e) = self.send_msgs(messages_to_send).await {
+            Err(anyhow::anyhow!("failed sending append entries RPC").context(e))
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn send_msgs(&mut self, msgs: Vec<Message>) -> Result<()> {
+        for m in msgs {
+            self.send(m).await?;
+        }
+        Ok(())
     }
 
     async fn process_append_entries(&mut self, msg: AppendEntriesMessage) {
@@ -127,7 +130,7 @@ impl<Conn: Connection> Replica<Conn> {
             StateRole::Follower(state) => {
                 if msg.term == self.term {
                     state.leader = Some(Peer::new(msg.leader));
-                    state.election_time = rand_jitter();
+                    state.election_time = rand_jitter(None);
 
                     let prefix_len = msg.prev_log_index;
 
@@ -163,7 +166,7 @@ impl<Conn: Connection> Replica<Conn> {
             let mut my_votes = HashSet::new();
             my_votes.insert(Peer::new(self.id.clone()));
             self.role = StateRole::Candidate(CandidateState {
-                election_time: rand_jitter(),
+                election_time: rand_jitter(None),
                 votes_recv: my_votes,
             });
             self.term += 1;
@@ -184,9 +187,23 @@ impl<Conn: Connection> Replica<Conn> {
     }
 
     pub async fn run(&mut self) -> Result<()> {
+        let mid = rand_string();
+        let msg = Message::Hello(HelloMessage {
+            src: self.id.clone(),
+            dst: BROADCAST.to_string(),
+            leader: BROADCAST.to_string(),
+            mid: mid,
+        });
+
+        if let Err(e) = self.send(msg).await {
+            return Err(anyhow!("Failed to send first hello message").context(e));
+        }
         let mut time = Instant::now();
         loop {
             let recv = self.conn.capture_recv_messages().await;
+            if let Ok(()) = signal::ctrl_c().await {
+                return Err(anyhow!("Program halted with CTRL > C"));
+            }
 
             match recv {
                 Ok(msg) => {
@@ -198,10 +215,12 @@ impl<Conn: Connection> Replica<Conn> {
                 }
                 Err(e) => eprintln!("Failed to recv msg {e}"),
             };
+            dbg!("time elapsed is {}", time.elapsed());
             match self.role {
                 StateRole::Candidate(CandidateState { election_time, .. })
                 | StateRole::Follower(FollowerState { election_time, .. }) => {
                     if time.elapsed() > Duration::from_millis(election_time) {
+                        dbg!("Timer elapsed as follower/candidate");
                         self.tick().await;
                         time = Instant::now();
                     }
@@ -215,10 +234,10 @@ impl<Conn: Connection> Replica<Conn> {
                 }
             }
         }
-        Ok(())
     }
 
     async fn handle_message(&mut self, msg: Message) {
+        dbg!("Going to handle msg as {}", &self.id);
         match msg {
             Message::Get(GetMessage {
                 src,
@@ -345,7 +364,7 @@ impl<Conn: Connection> Replica<Conn> {
         if term > self.term {
             self.term = term;
             self.role = StateRole::Follower(FollowerState {
-                election_time: rand_jitter(),
+                election_time: rand_jitter(None),
                 leader: None,
             });
         }
@@ -364,37 +383,86 @@ impl<Conn: Connection> Replica<Conn> {
 
 #[cfg(test)]
 mod tests {
-    use crate::{connection, ConnInfo, Connection, ConnectionGroup, Message};
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    use crate::{ConnInfo, Connection, ConnectionGroup, HelloMessage, Message};
 
     use crate::Replica;
     use anyhow::Result;
+    use rand::rngs::mock;
+    use tokio::sync::watch::Ref;
 
     struct MockConnGrp {
         src: String,
         dst: String,
         leader: String,
         mid: String,
+        pub times_called: Rc<RefCell<u64>>,
+    }
+
+    impl MockConnGrp {
+        fn new(times_called: Rc<RefCell<u64>>) -> MockConnGrp {
+            Self {
+                src: "0000".into(),
+                dst: "0001".into(),
+                leader: "0000".into(),
+                mid: "122123".into(),
+                times_called,
+            }
+        }
     }
 
     impl Connection for MockConnGrp {
-        async fn capture_recv_messages(&self) -> Result<Message> {
+        async fn capture_recv_messages(&mut self) -> Result<Message> {
+            *self.times_called.borrow_mut() += 1;
             return Ok(Message::Hello(crate::HelloMessage {
-                src: self.src,
-                dst: self.dst,
-                leader: self.leader,
-                mid: self.mid,
+                src: self.src.clone(),
+                dst: self.dst.clone(),
+                leader: self.leader.clone(),
+                mid: self.mid.clone(),
             }));
         }
 
-        async fn send_message(&self, msg: Message) -> anyhow::Result<()> {}
+        async fn send_message(&mut self, _msg: Message) -> anyhow::Result<()> {
+            *self.times_called.borrow_mut() += 1;
+            Ok(())
+        }
     }
 
     #[tokio::test]
-    async fn test_new_replica() {
+    async fn test_new_replica_creation() {
         let conn_info = ConnInfo::new(9090).await.unwrap();
         let conn = ConnectionGroup::new(conn_info);
-        let r = Replica::new("id".into(), vec!["1209", "1231"], conn)
+        let _ = Replica::new("id".into(), vec!["1209", "1231"], conn)
             .await
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_run_replica() {
+        let mock_counter = Rc::new(RefCell::new(0));
+        let conn = MockConnGrp::new(mock_counter.clone());
+        let mut rep = Replica::new("id".into(), vec!["1209", "1231"], conn)
+            .await
+            .unwrap();
+        let _ = rep
+            .send(Message::Hello(HelloMessage {
+                leader: "id".into(),
+                src: "1030".into(),
+                dst: "1031".into(),
+                mid: "12402014".into(),
+            }))
+            .await;
+        assert_eq!(*mock_counter.borrow(), 1u64);
+        let _ = rep
+            .send(Message::Hello(HelloMessage {
+                leader: "id".into(),
+                src: "1030".into(),
+                dst: "1031".into(),
+                mid: "12402014".into(),
+            }))
+            .await;
+        assert_eq!(*mock_counter.borrow(), 2u64);
     }
 }

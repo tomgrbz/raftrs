@@ -46,7 +46,13 @@ impl ConnInfo {
     }
 
     pub async fn ready_to_read(&self) -> Result<()> {
-        self.socket.readable().await?;
+        let v = self.socket.readable().await;
+
+        if let Err(ref e) = v {
+            if e.kind() == io::ErrorKind::WouldBlock {
+                return Ok(());
+            }
+        }
         Ok(())
     }
 }
