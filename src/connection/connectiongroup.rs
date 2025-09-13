@@ -36,10 +36,8 @@ impl ConnectionGroup {
 impl Connection for ConnectionGroup {
     async fn capture_recv_messages(&mut self) -> Result<Message> {
         // Wait for socket to be ready to read from
-        
+
         self.connection_info.ready_to_read().await?;
-        
-        dbg!("made it past ready_to_read");
 
         let mut packet_as_bytes = vec![0; 1024];
 
@@ -64,7 +62,7 @@ impl Connection for ConnectionGroup {
     }
     async fn send_message(&mut self, msg: Message) -> Result<()> {
         let message = serde_json::to_string(&msg).expect("Failed to parse json value to string");
-        println!("Sent msg from {}", msg.get_src());
+
         self.connection_info.send_msg(message.as_bytes()).await?;
         Ok(())
     }

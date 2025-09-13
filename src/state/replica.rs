@@ -7,11 +7,12 @@ use super::StateRole;
 use crate::{
     rand_heartbeat_inteval, rand_jitter, rand_string, AppendEntriesMessage,
     AppendEntriesMessageResponse, CandidateState, Connection, ConnectionGroup, FailMessage,
-    FollowerState, GetMessage, HelloMessage, LeaderState, Log, Message, Peer, PutMessage,
-    RequestVoteMessage, RequestVoteResponseMessage, Term, VolatileState, BROADCAST,
+    FollowerState, GetMessage, HelloMessage, LeaderState, Log, LogEntry, Message, OkMessage, Peer,
+    PutMessage, RedirectMessage, RequestVoteMessage, RequestVoteResponseMessage, Term, Ticks,
+    VolatileState, BROADCAST,
 };
 use anyhow::{anyhow, Result};
-use tokio::signal;
+use tokio::{signal, time::timeout};
 
 #[derive(Debug)]
 pub struct Replica<Conn: Connection> {
@@ -22,6 +23,8 @@ pub struct Replica<Conn: Connection> {
     voted_for: Option<Peer>,
     pub log: Log,
     pub term: Term,
+    pub ticks: Ticks,
+    leader: String,
 }
 
 impl<Conn: Connection> Replica<Conn> {
@@ -31,12 +34,7 @@ impl<Conn: Connection> Replica<Conn> {
             peers.push(Peer::new(peer.into()));
         }
         let rand_timeout = rand_jitter(None);
-        let role = {
-            StateRole::Follower(FollowerState {
-                election_time: rand_timeout,
-                leader: None,
-            })
-        };
+        let role = { StateRole::Follower(FollowerState { leader: None }) };
         let rep = Replica {
             id,
             role,
@@ -45,8 +43,10 @@ impl<Conn: Connection> Replica<Conn> {
             voted_for: None,
             log: Log::new(),
             term: 0,
+            ticks: rand_timeout,
+            leader: String::from("FFFF"),
         };
-        println!("Created Replica object");
+
         Ok(rep)
     }
 
@@ -62,27 +62,33 @@ impl<Conn: Connection> Replica<Conn> {
     }
     async fn tick(&mut self) {
         if let StateRole::Leader(LeaderState { .. }) = self.role {
-            self.tick_heartbeat().await;
+            let _ = self.tick_heartbeat().await;
         } else {
             let _ = self.tick_election().await;
         }
     }
 
-    async fn tick_heartbeat(&mut self) {
-        self.replicate_log().await;
+    async fn tick_heartbeat(&mut self) -> Result<()> {
+        self.ticks = rand_heartbeat_inteval();
+        self.replicate_log().await
     }
 
     async fn replicate_log(&mut self) -> Result<()> {
         let mut messages_to_send = Vec::new();
-        if let StateRole::Leader(LeaderState {
-            followers,
-            heartbeat,
-        }) = &mut self.role
-        {
-            *heartbeat = rand_heartbeat_inteval();
+        if let StateRole::Leader(LeaderState { followers, .. }) = &mut self.role {
+            // self.ticks = rand_heartbeat_inteval();
 
             for (follower, state) in followers.iter() {
-                let prev_idx = state.next_index;
+                let prev_idx = if state.next_index == 0 {
+                    0
+                } else {
+                    state.next_index - 1
+                };
+                let entry = if let Some(val) = self.log.entries.get(prev_idx) {
+                    val.term
+                } else {
+                    0
+                };
                 let mid = rand_string();
                 let follower_id = follower.get_peer_id();
 
@@ -93,7 +99,7 @@ impl<Conn: Connection> Replica<Conn> {
                     mid: mid,
                     term: self.term,
                     prev_log_index: prev_idx,
-                    prev_log_term: self.log.entries.get(prev_idx - 1).unwrap().term,
+                    prev_log_term: entry,
                     entries: Vec::new(),
                     leader_commit_idx: self.log.committed_len,
                 };
@@ -102,8 +108,14 @@ impl<Conn: Connection> Replica<Conn> {
             }
         }
         if let Err(e) = self.send_msgs(messages_to_send).await {
+            if let StateRole::Leader(ref mut leader_state) = self.role {
+                leader_state.heartbeat_due = Instant::now() + Duration::from_millis(150);
+            }
             Err(anyhow::anyhow!("failed sending append entries RPC").context(e))
         } else {
+            if let StateRole::Leader(ref mut leader_state) = self.role {
+                leader_state.heartbeat_due = Instant::now() + Duration::from_millis(150);
+            }
             Ok(())
         }
     }
@@ -128,45 +140,43 @@ impl<Conn: Connection> Replica<Conn> {
                 }
             }
             StateRole::Follower(state) => {
-                if msg.term == self.term {
-                    state.leader = Some(Peer::new(msg.leader));
-                    state.election_time = rand_jitter(None);
+                // if msg.term == self.term {
 
-                    let prefix_len = msg.prev_log_index;
+                self.ticks = rand_jitter(None);
 
-                    let prefix_ok = self.log.entries.len() >= prefix_len;
-                    let last_terms_match = prefix_len == 0
-                        || self
-                            .log
-                            .entries
-                            .get(prefix_len - 1)
-                            .expect("Failed to get valid keyentry")
-                            .term
-                            == msg.term;
-                    if prefix_ok && last_terms_match {
-                        let msg = AppendEntriesMessageResponse {
-                            src: self.id.clone(),
-                            dst: msg.src.clone(),
-                            leader: state.leader.clone().unwrap().get_peer_id(),
-                            mid: msg.mid,
-                            term: self.term,
-                            success: true,
-                        };
-                        let _ = self.send(Message::AppendEntriesResponse(msg)).await;
-                    }
+                let prefix_len = msg.prev_log_index;
+
+                let prefix_ok = self.log.entries.len() >= prefix_len;
+                let last_terms_match = prefix_len == 0
+                    || self
+                        .log
+                        .entries
+                        .get(prefix_len - 1)
+                        .expect("Failed to get valid keyentry")
+                        .term
+                        == msg.prev_log_term;
+                if prefix_ok && last_terms_match {
+                    state.leader = Some(Peer::new(msg.leader.clone()));
+                    self.leader = msg.leader.clone();
+                    let msg = AppendEntriesMessageResponse {
+                        src: self.id.clone(),
+                        dst: msg.src.clone(),
+                        leader: state.leader.clone().unwrap().get_peer_id(),
+                        mid: msg.mid,
+                        term: self.term,
+                        success: true,
+                    };
+                    let _ = self.send(Message::AppendEntriesResponse(msg)).await;
                 }
             }
         }
     }
 
     async fn tick_election(&mut self) -> Result<()> {
-        if let StateRole::Follower(FollowerState { election_time, .. })
-        | StateRole::Candidate(CandidateState { election_time, .. }) = &mut self.role
-        {
+        if let StateRole::Follower(_) | StateRole::Candidate(_) = &mut self.role {
             let mut my_votes = HashSet::new();
             my_votes.insert(Peer::new(self.id.clone()));
             self.role = StateRole::Candidate(CandidateState {
-                election_time: rand_jitter(None),
                 votes_recv: my_votes,
             });
             self.term += 1;
@@ -198,80 +208,172 @@ impl<Conn: Connection> Replica<Conn> {
         if let Err(e) = self.send(msg).await {
             return Err(anyhow!("Failed to send first hello message").context(e));
         }
-        let mut time = Instant::now();
         loop {
-            let recv = self.conn.capture_recv_messages().await;
-            if let Ok(()) = signal::ctrl_c().await {
-                return Err(anyhow!("Program halted with CTRL > C"));
-            }
+            let recv = timeout(
+                Duration::from_millis(self.ticks),
+                self.conn.capture_recv_messages(),
+            )
+            .await;
+            // if let Ok(()) = signal::ctrl_c().await {
+            //     return Err(anyhow!("Program halted with CTRL > C"));
+            // }
 
             match recv {
-                Ok(msg) => {
-                    if let Message::AppendEntries(..) = msg {
-                        println!("Received append rpc");
-                        time = Instant::now();
+                Ok(inner_result) => {
+                    if let Ok(msg) = inner_result {
+                        if let (Message::RequestVote(v)) = &msg {
+                            println!("Msg received  {:?}", v);
+                        }
+
+                        self.handle_message(msg).await;
+                        if let StateRole::Leader(ref mut leader_state) = self.role {
+                            if Instant::now() >= leader_state.heartbeat_due {
+                                self.replicate_log().await?;
+                            }
+                        }
                     }
-                    self.handle_message(msg).await;
                 }
-                Err(e) => eprintln!("Failed to recv msg {e}"),
+
+                Err(_) => {
+                    self.tick().await;
+                }
             };
-            dbg!("time elapsed is {}", time.elapsed());
-            match self.role {
-                StateRole::Candidate(CandidateState { election_time, .. })
-                | StateRole::Follower(FollowerState { election_time, .. }) => {
-                    if time.elapsed() > Duration::from_millis(election_time) {
-                        dbg!("Timer elapsed as follower/candidate");
-                        self.tick().await;
-                        time = Instant::now();
+        }
+    }
+
+    async fn handle_put_msg(&mut self, msg: PutMessage) {
+        if let StateRole::Leader(state) = self.role.clone() {
+            let log_entry = LogEntry::new(self.term, &msg.key, &msg.value);
+            self.log.append_new_entry(log_entry);
+            let resp = Message::Ok(OkMessage {
+                src: self.id.clone(),
+                dst: msg.src.clone(),
+                msg_type: "ok".into(),
+                leader: {
+                    if let StateRole::Follower(state) = self.role.clone() {
+                        if let Some(leader) = state.leader {
+                            leader.get_peer_id()
+                        } else {
+                            BROADCAST.into()
+                        }
+                    } else if let StateRole::Leader(_) = self.role.clone() {
+                        self.id.clone()
+                    } else {
+                        BROADCAST.into()
                     }
-                }
-                StateRole::Leader(LeaderState { heartbeat, .. }) => {
-                    if time.elapsed() > Duration::from_millis(heartbeat) {
-                        println!("leader sending heartbeat");
-                        self.tick().await;
-                        time = Instant::now();
+                },
+                mid: msg.mid.clone(),
+                value: Some(msg.value.clone()), //self.log.get_value(&msg.key),
+            });
+            // println!("Leader given PUT msg: {:?}", &msg);
+            // println!("Leader returning PUT: {}", &resp);
+            let _ = self.send(resp).await;
+        } else {
+            let msg = Message::Redirect(RedirectMessage {
+                src: self.id.clone(),
+                dst: msg.src.into(),
+                msg_type: "redirect".into(),
+                leader: {
+                    if let StateRole::Follower(state) = self.role.clone() {
+                        if let Some(leader) = state.leader {
+                            leader.get_peer_id()
+                        } else {
+                            BROADCAST.into()
+                        }
+                    } else if let StateRole::Leader(_) = self.role.clone() {
+                        self.id.clone()
+                    } else {
+                        BROADCAST.into()
                     }
-                }
-            }
+                },
+                mid: msg.mid.into(),
+            });
+            let _ = self.conn.send_message(msg).await;
         }
     }
 
     async fn handle_message(&mut self, msg: Message) {
-        dbg!("Going to handle msg as {}", &self.id);
         match msg {
+            Message::Hello(HelloMessage {
+                src,
+                dst,
+                mid,
+                leader,
+            }) => {
+                let leader: String = if leader == self.leader {
+                    leader
+                } else {
+                    self.leader.clone()
+                };
+
+                let msg = Message::Ok(crate::OkMessage {
+                    src: self.id.clone(),
+                    dst: dst,
+                    msg_type: "ok".into(),
+                    leader: leader,
+                    mid: mid.clone(),
+                    value: None,
+                });
+                let _ = self.send(msg).await;
+            }
+            Message::Put(put) => {
+                self.handle_put_msg(put).await;
+            }
             Message::Get(GetMessage {
                 src,
                 dst,
                 leader,
                 mid,
-                ..
-            })
-            | Message::Put(PutMessage {
-                src,
-                dst,
-                leader,
-                mid,
+                key,
                 ..
             }) => {
-                let msg = Message::Fail(FailMessage {
-                    src: self.id.clone(),
-                    dst: src.into(),
-                    leader: {
-                        if let StateRole::Follower(state) = self.role.clone() {
-                            if let Some(leader) = state.leader {
-                                leader.get_peer_id()
+                if let StateRole::Leader(state) = self.role.clone() {
+                    let msg = Message::Ok(OkMessage {
+                        src: self.id.clone(),
+                        dst: src.clone(),
+                        msg_type: "ok".into(),
+                        leader: {
+                            if let StateRole::Follower(state) = self.role.clone() {
+                                if let Some(leader) = state.leader {
+                                    leader.get_peer_id()
+                                } else {
+                                    BROADCAST.into()
+                                }
+                            } else if let StateRole::Leader(_) = self.role.clone() {
+                                self.id.clone()
                             } else {
                                 BROADCAST.into()
                             }
-                        } else if let StateRole::Leader(_) = self.role.clone() {
-                            self.id.clone()
-                        } else {
-                            BROADCAST.into()
-                        }
-                    },
-                    mid: mid.into(),
-                });
-                let _ = self.conn.send_message(msg).await;
+                        },
+                        mid: mid.clone(),
+                        value: self.log.get_value(&key),
+                    });
+                    // println!("Leader given GET msg: {}", &key);
+                    // println!("Sending back GET msg: {}", &msg);
+                    let _ = self.send(msg).await;
+                } else {
+                    let msg = Message::Redirect(RedirectMessage {
+                        src: self.id.clone(),
+                        dst: src.into(),
+                        msg_type: "redirect".into(),
+                        leader: {
+                            if let StateRole::Follower(state) = self.role.clone() {
+                                if let Some(leader) = state.leader {
+                                    leader.get_peer_id()
+                                } else {
+                                    BROADCAST.into()
+                                }
+                            } else if let StateRole::Leader(_) = self.role.clone() {
+                                self.id.clone()
+                            } else {
+                                BROADCAST.into()
+                            }
+                        },
+                        mid: mid.into(),
+                    });
+                    println!("Sending redirect: {}", msg);
+                    let _ = self.conn.send_message(msg).await;
+                }
             }
             Message::RequestVote(msg) => {
                 self.process_election_request(msg).await;
@@ -300,13 +402,15 @@ impl<Conn: Connection> Replica<Conn> {
         };
 
         // candidate term is as long or equal to this term, making it valid
-        let cand_log_term_valid = msg.last_log_term > self.log.get_last_term();
+        let cand_log_term_valid = msg.last_log_term >= self.log.get_last_term();
         let cand_log_is_longer = msg.last_log_term == self.log.get_last_term()
-            && msg.last_log_idx > self.log.get_last_idx();
+            && msg.last_log_idx >= self.log.get_last_idx();
         let log_is_valid = cand_log_term_valid || cand_log_is_longer;
 
-        let up_to_date = msg.candidate_term == self.term;
-
+        let up_to_date = msg.candidate_term >= self.term;
+        println!("The value of cand_log_term_valid {}", &cand_log_term_valid);
+        println!("The value of cand_log_is_longer {}", &cand_log_is_longer);
+        println!("The value of log_is_valid {}", &log_is_valid);
         let success = if up_to_date && log_is_valid && havent_voted {
             self.voted_for = Some(Peer::new(msg.src.clone()));
             true
@@ -338,21 +442,16 @@ impl<Conn: Connection> Replica<Conn> {
             if same_term && msg.voted_granted {
                 state.votes_recv.insert(Peer::new(msg.src));
 
-                if state.votes_recv.len() > self.quorum_size() {
+                if state.votes_recv.len() >= self.quorum_size() {
                     let mut follower_list_as_leader = HashMap::new();
                     self.others.iter().for_each(|peer| {
-                        match follower_list_as_leader.insert(
+                        follower_list_as_leader.insert(
                             peer.clone(),
                             VolatileState {
                                 next_index: self.log.get_last_idx(),
                                 match_index: 0,
                             },
-                        ) {
-                            None => {
-                                println!("Invalid insert for new election");
-                            }
-                            _ => {}
-                        }
+                        );
                     });
                     self.promote_to_leader(follower_list_as_leader).await;
                 }
@@ -361,23 +460,21 @@ impl<Conn: Connection> Replica<Conn> {
     }
 
     fn reset_to_follower(&mut self, term: Term) {
-        if term > self.term {
-            self.term = term;
-            self.role = StateRole::Follower(FollowerState {
-                election_time: rand_jitter(None),
-                leader: None,
-            });
-        }
+        self.term = term;
+        self.role = StateRole::Follower(FollowerState { leader: None });
         self.voted_for = None;
+        self.ticks = rand_jitter(None);
     }
 
     async fn promote_to_leader(&mut self, followers: HashMap<Peer, VolatileState>) {
         self.role = StateRole::Leader(LeaderState {
             followers: followers,
-            heartbeat: rand_heartbeat_inteval(),
+            heartbeat_due: Instant::now() + Duration::from_millis(150),
         });
+        self.leader = self.id.clone();
+        self.ticks = rand_heartbeat_inteval();
         println!("NEW LEADER ELECTED: {}", self.id.clone());
-        self.replicate_log().await;
+        let _ = self.replicate_log().await;
     }
 }
 

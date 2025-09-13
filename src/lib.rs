@@ -3,7 +3,7 @@ pub mod data;
 pub mod state;
 pub mod utils;
 
-use std::collections::HashMap;
+use std::{collections::HashMap, usize};
 
 pub use connection::*;
 pub use data::*;
@@ -29,6 +29,10 @@ pub struct Log {
 }
 
 impl Log {
+    pub fn append_new_entry(&mut self, entry: LogEntry) {
+        self.entries.push(entry.clone());
+        self.state.insert(entry.key.clone(), entry.clone());
+    }
     pub fn new() -> Self {
         let new_state: HashMap<String, LogEntry> = HashMap::new();
         Self {
@@ -44,6 +48,14 @@ impl Log {
             self.entries.len() - 1
         } else {
             0
+        }
+    }
+
+    pub fn get_value(&self, key: &str) -> Option<String> {
+        if let Some(val) = self.state.get(key.clone()) {
+            Some(val.value.clone())
+        } else {
+            None
         }
     }
 
@@ -68,4 +80,14 @@ pub struct LogEntry {
     pub term: usize,
     pub key: String,
     pub value: String,
+}
+
+impl LogEntry {
+    pub fn new(term: usize, key: &str, value: &str) -> Self {
+        return Self {
+            term,
+            key: key.into(),
+            value: value.into(),
+        };
+    }
 }

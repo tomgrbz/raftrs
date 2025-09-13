@@ -62,6 +62,9 @@ pub struct OkMessage {
 
     pub leader: String,
 
+    #[serde(rename = "type")]
+    pub msg_type: String,
+
     #[serde(rename = "MID")]
     pub mid: String,
 
@@ -78,6 +81,9 @@ pub struct FailMessage {
 
     pub leader: String,
 
+    #[serde(rename = "type")]
+    pub msg_type: String,
+
     #[serde(rename = "MID")]
     pub mid: String,
 }
@@ -88,6 +94,9 @@ pub struct RedirectMessage {
     pub src: String,
 
     pub dst: String,
+
+    #[serde(rename = "type")]
+    pub msg_type: String,
 
     pub leader: String,
 
@@ -312,6 +321,14 @@ impl Message {
             Message::RequestVoteResponse(msg) => &msg.src,
         }
     }
+
+    pub fn get_key(&self) -> &str {
+        match self {
+            Message::Get(msg) => &msg.key,
+            Message::Put(msg) => &msg.key,
+            _ => "",
+        }
+    }
 }
 mod tests {
 
@@ -354,6 +371,7 @@ mod tests {
             src: "0000".into(),
             dst: "ffff".into(),
             leader: "0000".into(),
+            msg_type: "ok".into(),
             mid: "Random".into(),
             value: None,
         });
@@ -385,6 +403,7 @@ mod tests {
             src: "0000".into(),
             dst: "ffff".into(),
             leader: "0000".into(),
+            msg_type: "ok".into(),
             mid: "Random".into(),
             value: Some("89".into()),
         });

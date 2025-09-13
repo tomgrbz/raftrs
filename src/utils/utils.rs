@@ -13,13 +13,13 @@ pub fn rand_jitter(seed: Option<ThreadRng>) -> Ticks {
         return seed.gen_range(150..=300);
     }
     let mut rng = thread_rng();
-    rng.gen_range(150..=300)
+    rng.gen_range(300..=1200)
 }
 
 pub fn rand_heartbeat_inteval() -> Ticks {
     use rand::{thread_rng, Rng};
     let mut rng = thread_rng();
-    rng.gen_range(50..=90)
+    rng.gen_range(50..=70)
 }
 
 // #[cfg(test)]

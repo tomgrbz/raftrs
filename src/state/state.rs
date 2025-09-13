@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Instant,
+};
 
 use crate::{Peer, Ticks};
 
@@ -12,21 +15,19 @@ pub enum StateRole {
     Leader(LeaderState),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct LeaderState {
     pub followers: HashMap<Peer, VolatileState>,
-    pub heartbeat: Ticks,
+    pub heartbeat_due: Instant,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct CandidateState {
-    pub election_time: Ticks,
     pub votes_recv: HashSet<Peer>,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct FollowerState {
-    pub election_time: Ticks,
     pub leader: Option<Peer>,
 }
 
